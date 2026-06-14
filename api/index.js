@@ -1,4 +1,13 @@
 require("dotenv").config();
 const app = require("../server/app");
+const { initDB } = require("../db/queries");
 
-module.exports = app;
+let ready = false;
+
+module.exports = async (req, res) => {
+  if (!ready) {
+    await initDB();
+    ready = true;
+  }
+  return app(req, res);
+};

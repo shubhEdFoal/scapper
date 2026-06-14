@@ -1,11 +1,14 @@
+const { randomUUID } = require("crypto");
 const { scrapeGoogleMaps } = require("../../src/scraper");
 const {
   insertMany,
   getAllBusinesses,
   getBusinessById,
   clearAllBusinesses,
-  getScrapeStatus,
-  setScrapeStatus,
+  createScrapeRequest,
+  updateScrapeRequest,
+  getAllScrapeRequests,
+  getScrapeRequestById,
 } = require("../../db/queries");
 const config = require("../../config");
 const { buildSearchQuery } = require("../../src/utils");
@@ -43,39 +46,29 @@ function parseScrapeBody(body = {}) {
 }
 
 async function runScrapeJob(params) {
-  const { businessType, state, country, numberOfLeads, emailTone, query } = params;
-  const metadata = { businessType, state, country, emailTone };
+  const { businessType, state, country, numberOfLeads, emailTone, query, requestID } = params;
+  const metadata = { businessType, state, country, emailTone, requestID };
 
   try {
     const results = await scrapeGoogleMaps(query, numberOfLeads, metadata);
-    const inserted = await insertMany(results);
-    const status = await getScrapeStatus();
-    await setScrapeStatus({
-      ...status,
+    const recordsWithRequest = results.map((r) => ({ ...r, requestID }));
+    const inserted = await insertMany(recordsWithRequest);
+    await updateScrapeRequest(requestID, {
+      status: "completed",
       inserted: inserted.length,
-      isRunning: false,
       error: null,
+      completedAt: new Date().toISOString(),
     });
   } catch (err) {
-    const status = await getScrapeStatus();
-    await setScrapeStatus({
-      ...status,
+    await updateScrapeRequest(requestID, {
+      status: "failed",
       error: err.message,
-      isRunning: false,
+      completedAt: new Date().toISOString(),
     });
   }
 }
 
 async function triggerScrape(req, res) {
-  const scrapingStatus = await getScrapeStatus();
-
-  if (scrapingStatus.isRunning) {
-    return res.status(409).json({
-      success: false,
-      message: "Scraping already in progress. /api/scrape/status check karo.",
-    });
-  }
-
   const params = parseScrapeBody(req.body);
   if (!params) {
     return res.status(400).json({
@@ -86,22 +79,21 @@ async function triggerScrape(req, res) {
   }
 
   const { businessType, state, country, numberOfLeads, emailTone, query } = params;
+  const requestID = randomUUID();
+  const startedAt = new Date().toISOString();
 
-  const newStatus = {
-    isRunning: true,
-    startedAt: new Date().toISOString(),
+  await createScrapeRequest({
+    requestID,
     businessType,
     state,
     country,
     numberOfLeads,
     emailTone,
     query,
-    inserted: 0,
-    error: null,
-  };
-  await setScrapeStatus(newStatus);
+    startedAt,
+  });
 
-  const scrapePromise = runScrapeJob(params);
+  const scrapePromise = runScrapeJob({ ...params, requestID });
 
   if (config.IS_VERCEL) {
     const { waitUntil } = require("@vercel/functions");
@@ -112,6 +104,7 @@ async function triggerScrape(req, res) {
 
   res.json({
     success: true,
+    requestID,
     message: config.IS_VERCEL
       ? "Scraping start ho gayi! Vercel pe max 3-5 leads recommend hai (timeout limit)."
       : "Scraping background mein start ho gayi!",
@@ -121,17 +114,36 @@ async function triggerScrape(req, res) {
     numberOfLeads,
     emailTone,
     query,
-    statusUrl: "/api/scrape/status",
+    statusUrl: `/api/status/${requestID}`,
   });
 }
 
-async function getStatus(req, res) {
-  const scrapingStatus = await getScrapeStatus();
-  const { total } = await getAllBusinesses({ limit: 1 });
+async function getAllStatuses(req, res) {
+  const { status } = req.query;
+  const requests = await getAllScrapeRequests({ status });
+  const running = requests.filter((r) => r.isRunning).length;
+
   res.json({
     success: true,
-    status: scrapingStatus,
-    totalRecordsInDB: total,
+    total: requests.length,
+    running,
+    requests,
+  });
+}
+
+async function getStatusByRequestId(req, res) {
+  const request = await getScrapeRequestById(req.params.requestId);
+  if (!request) {
+    return res.status(404).json({
+      success: false,
+      message: "Request nahi mili",
+      requestID: req.params.requestId,
+    });
+  }
+
+  res.json({
+    success: true,
+    request,
   });
 }
 
@@ -154,4 +166,11 @@ async function clearResults(req, res) {
   res.json({ success: true, message: "Turso DB se sab records delete ho gaye" });
 }
 
-module.exports = { triggerScrape, getStatus, getAllResults, getResultById, clearResults };
+module.exports = {
+  triggerScrape,
+  getAllStatuses,
+  getStatusByRequestId,
+  getAllResults,
+  getResultById,
+  clearResults,
+};

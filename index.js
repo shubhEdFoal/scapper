@@ -24,7 +24,8 @@ async function main() {
     console.log(chalk.yellow(`📋 API Docs: http://localhost:${config.PORT}/`));
     console.log(chalk.white(`\nEndpoints:`));
     console.log(`  POST   /api/scrape`);
-    console.log(`  GET    /api/scrape/status`);
+    console.log(`  GET    /api/status`);
+    console.log(`  GET    /api/status/:requestId`);
     console.log(`  GET    /api/results`);
     console.log(`  GET    /api/results/:id`);
     console.log(`  DELETE /api/results`);

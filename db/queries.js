@@ -34,6 +34,7 @@ async function initDB() {
     "ALTER TABLE businesses ADD COLUMN mail_status TEXT",
     "ALTER TABLE businesses ADD COLUMN response TEXT",
     "ALTER TABLE businesses ADD COLUMN replied_by_us TEXT",
+    "ALTER TABLE businesses ADD COLUMN request_id TEXT",
   ];
 
   for (const sql of migrations) {
@@ -52,36 +53,116 @@ async function initDB() {
       value TEXT NOT NULL
     )
   `);
+
+  await getClient().execute(`
+    CREATE TABLE IF NOT EXISTS scrape_requests (
+      id              TEXT PRIMARY KEY,
+      business_type   TEXT,
+      state           TEXT,
+      country         TEXT,
+      number_of_leads INTEGER,
+      email_tone      TEXT,
+      query           TEXT,
+      status          TEXT NOT NULL DEFAULT 'running',
+      inserted        INTEGER DEFAULT 0,
+      error           TEXT,
+      started_at      TEXT NOT NULL,
+      completed_at    TEXT,
+      created_at      TEXT DEFAULT (datetime('now'))
+    )
+  `);
 }
 
-const DEFAULT_SCRAPE_STATUS = {
-  isRunning: false,
-  startedAt: null,
-  businessType: null,
-  state: null,
-  country: null,
-  numberOfLeads: null,
-  emailTone: null,
-  query: null,
-  inserted: 0,
-  error: null,
-};
-
-async function getScrapeStatus() {
-  const result = await getClient().execute({
-    sql: "SELECT value FROM app_state WHERE key = 'scraping_status'",
-    args: [],
-  });
-  if (result.rows.length === 0) return { ...DEFAULT_SCRAPE_STATUS };
-  return { ...DEFAULT_SCRAPE_STATUS, ...JSON.parse(result.rows[0].value) };
-}
-
-async function setScrapeStatus(status) {
+async function createScrapeRequest(request) {
   await getClient().execute({
-    sql: `INSERT INTO app_state (key, value) VALUES ('scraping_status', ?)
-          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    args: [JSON.stringify(status)],
+    sql: `
+      INSERT INTO scrape_requests
+        (id, business_type, state, country, number_of_leads, email_tone, query, status, started_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)
+    `,
+    args: [
+      request.requestID,
+      request.businessType || null,
+      request.state || null,
+      request.country || null,
+      request.numberOfLeads || null,
+      request.emailTone || null,
+      request.query || null,
+      request.startedAt,
+    ],
   });
+}
+
+async function updateScrapeRequest(requestID, updates) {
+  const fields = [];
+  const args = [];
+
+  if (updates.status !== undefined) {
+    fields.push("status = ?");
+    args.push(updates.status);
+  }
+  if (updates.inserted !== undefined) {
+    fields.push("inserted = ?");
+    args.push(updates.inserted);
+  }
+  if (updates.error !== undefined) {
+    fields.push("error = ?");
+    args.push(updates.error);
+  }
+  if (updates.completedAt !== undefined) {
+    fields.push("completed_at = ?");
+    args.push(updates.completedAt);
+  }
+
+  if (fields.length === 0) return;
+
+  await getClient().execute({
+    sql: `UPDATE scrape_requests SET ${fields.join(", ")} WHERE id = ?`,
+    args: [...args, requestID],
+  });
+}
+
+function requestRowToRecord(row) {
+  return {
+    requestID: row.id,
+    status: row.status,
+    isRunning: row.status === "running",
+    businessType: row.business_type,
+    state: row.state,
+    country: row.country,
+    numberOfLeads: row.number_of_leads,
+    emailTone: row.email_tone,
+    query: row.query,
+    inserted: row.inserted,
+    error: row.error,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+  };
+}
+
+async function getAllScrapeRequests({ status } = {}) {
+  const args = [];
+  let sql = "SELECT * FROM scrape_requests";
+
+  if (status) {
+    sql += " WHERE status = ?";
+    args.push(status);
+  }
+
+  sql += " ORDER BY started_at DESC";
+
+  const result = await getClient().execute({ sql, args });
+  return result.rows.map(requestRowToRecord);
+}
+
+async function getScrapeRequestById(requestID) {
+  const result = await getClient().execute({
+    sql: "SELECT * FROM scrape_requests WHERE id = ?",
+    args: [requestID],
+  });
+  if (result.rows.length === 0) return null;
+  return requestRowToRecord(result.rows[0]);
 }
 
 async function insertBusiness(record) {
@@ -90,9 +171,9 @@ async function insertBusiness(record) {
       INSERT INTO businesses
         (name, address, phone, website, rating, emails, linkedin_search, maps_url,
          business_type, state, country, email_tone, sent_id, mail_status, response,
-         replied_by_us, scraped_at)
+         replied_by_us, scraped_at, request_id)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     args: [
       record.name,
@@ -112,6 +193,7 @@ async function insertBusiness(record) {
       null,
       null,
       record.scrapedAt || new Date().toISOString(),
+      record.requestID || null,
     ],
   });
   return result.lastInsertRowid;
@@ -199,6 +281,7 @@ function rowToRecord(row) {
     response: row.response,
     repliedByUs: row.replied_by_us,
     scrapedAt: row.scraped_at,
+    requestID: row.request_id,
     createdAt: row.created_at,
   };
 }
@@ -210,6 +293,8 @@ module.exports = {
   getAllBusinesses,
   getBusinessById,
   clearAllBusinesses,
-  getScrapeStatus,
-  setScrapeStatus,
+  createScrapeRequest,
+  updateScrapeRequest,
+  getAllScrapeRequests,
+  getScrapeRequestById,
 };
