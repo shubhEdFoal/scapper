@@ -31,10 +31,7 @@ async function main() {
   });
 }
 
-// Vercel pe api/index.js chalta hai — yeh file sirf local ke liye
-if (!process.env.VERCEL) {
-  main().catch((err) => {
-    console.error(chalk.red("❌ Startup failed:"), err.message);
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  console.error(chalk.red("❌ Startup failed:"), err.message);
+  process.exit(1);
+});

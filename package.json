@@ -2,11 +2,10 @@
   "name": "google-maps-scraper",
   "version": "1.0.0",
   "description": "Google Maps scraper with Express API + Turso DB",
-  "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "vercel-build": "echo 'No build step required'"
+    "dev": "nodemon local-server.js",
+    "local": "node local-server.js",
+    "vercel-build": "echo 'Serverless deploy — no build step'"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
