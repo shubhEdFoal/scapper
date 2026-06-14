@@ -1,7 +1,7 @@
-const client = require("./client");
+const { getClient } = require("./client");
 
 async function initDB() {
-  await client.execute(`
+  await getClient().execute(`
     CREATE TABLE IF NOT EXISTS businesses (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       name            TEXT NOT NULL,
@@ -38,7 +38,7 @@ async function initDB() {
 
   for (const sql of migrations) {
     try {
-      await client.execute(sql);
+      await getClient().execute(sql);
     } catch {
       // column already exists
     }
@@ -46,7 +46,7 @@ async function initDB() {
 
   console.log("✅ Turso DB initialized — table ready");
 
-  await client.execute(`
+  await getClient().execute(`
     CREATE TABLE IF NOT EXISTS app_state (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -68,7 +68,7 @@ const DEFAULT_SCRAPE_STATUS = {
 };
 
 async function getScrapeStatus() {
-  const result = await client.execute({
+  const result = await getClient().execute({
     sql: "SELECT value FROM app_state WHERE key = 'scraping_status'",
     args: [],
   });
@@ -77,7 +77,7 @@ async function getScrapeStatus() {
 }
 
 async function setScrapeStatus(status) {
-  await client.execute({
+  await getClient().execute({
     sql: `INSERT INTO app_state (key, value) VALUES ('scraping_status', ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     args: [JSON.stringify(status)],
@@ -85,7 +85,7 @@ async function setScrapeStatus(status) {
 }
 
 async function insertBusiness(record) {
-  const result = await client.execute({
+  const result = await getClient().execute({
     sql: `
       INSERT INTO businesses
         (name, address, phone, website, rating, emails, linkedin_search, maps_url,
@@ -120,7 +120,7 @@ async function insertBusiness(record) {
 async function insertMany(records) {
   const inserted = [];
   for (const record of records) {
-    const existing = await client.execute({
+    const existing = await getClient().execute({
       sql: "SELECT id FROM businesses WHERE name = ? LIMIT 1",
       args: [record.name],
     });
@@ -151,13 +151,13 @@ async function getAllBusinesses({ search, hasEmail, hasWebsite, page = 1, limit 
   const where = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
   const offset = (page - 1) * limit;
 
-  const countResult = await client.execute({
+  const countResult = await getClient().execute({
     sql: `SELECT COUNT(*) as count FROM businesses ${where}`,
     args,
   });
   const total = Number(countResult.rows[0].count);
 
-  const dataResult = await client.execute({
+  const dataResult = await getClient().execute({
     sql: `SELECT * FROM businesses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     args: [...args, limit, offset],
   });
@@ -167,7 +167,7 @@ async function getAllBusinesses({ search, hasEmail, hasWebsite, page = 1, limit 
 }
 
 async function getBusinessById(id) {
-  const result = await client.execute({
+  const result = await getClient().execute({
     sql: "SELECT * FROM businesses WHERE id = ?",
     args: [id],
   });
@@ -176,7 +176,7 @@ async function getBusinessById(id) {
 }
 
 async function clearAllBusinesses() {
-  await client.execute("DELETE FROM businesses");
+  await getClient().execute("DELETE FROM businesses");
 }
 
 function rowToRecord(row) {

@@ -18,11 +18,4 @@ function getClient() {
   return _client;
 }
 
-module.exports = new Proxy(
-  {},
-  {
-    get(_, prop) {
-      return getClient()[prop];
-    },
-  }
-);
+module.exports = { getClient };
