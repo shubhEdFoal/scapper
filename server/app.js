@@ -1,8 +1,34 @@
 const express = require("express");
 const cors = require("cors");
+const config = require("../config");
 const scraperRoutes = require("./routes/scraper.routes");
+const { initDB } = require("../db/queries");
 
 const app = express();
+
+let dbInitPromise = null;
+
+app.use(async (req, res, next) => {
+  if (!config.TURSO_DATABASE_URL || !config.TURSO_AUTH_TOKEN) {
+    return res.status(500).json({
+      success: false,
+      message:
+        "Turso credentials missing. Vercel → Settings → Environment Variables mein TURSO_DATABASE_URL aur TURSO_AUTH_TOKEN add karo.",
+    });
+  }
+
+  if (!dbInitPromise) {
+    dbInitPromise = initDB();
+  }
+
+  try {
+    await dbInitPromise;
+    next();
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.use(cors());
 app.use(express.json());
 
